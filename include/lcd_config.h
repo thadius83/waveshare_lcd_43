@@ -1,0 +1,80 @@
+#ifndef LCD_CONFIG_H
+#define LCD_CONFIG_H
+
+#define LCD_BCKL_ON_LEVEL 1
+#define LCD_BCKL_OFF_LEVEL !LCD_BCKL_ON_LEVEL
+#define LCD_PIN_NUM_DE 5
+#define LCD_PIN_NUM_VSYNC 3
+#define LCD_PIN_NUM_HSYNC 46
+#define LCD_PIN_NUM_CLK 7
+#define LCD_PIN_NUM_D00 14
+#define LCD_PIN_NUM_D01 38
+#define LCD_PIN_NUM_D02 18
+#define LCD_PIN_NUM_D03 17
+#define LCD_PIN_NUM_D04 10
+#define LCD_PIN_NUM_D05 39
+#define LCD_PIN_NUM_D06 0
+#define LCD_PIN_NUM_D07 45
+#define LCD_PIN_NUM_D08 48
+#define LCD_PIN_NUM_D09 47
+#define LCD_PIN_NUM_D10 21
+#define LCD_PIN_NUM_D11 1
+#define LCD_PIN_NUM_D12 2
+#define LCD_PIN_NUM_D13 42
+#define LCD_PIN_NUM_D14 41
+#define LCD_PIN_NUM_D15 40
+#define LCD_PIN_NUM_BCKL -1
+#define LCD_HSYNC_POLARITY 0
+#define LCD_HSYNC_FRONT_PORCH 8
+#define LCD_HSYNC_PULSE_WIDTH 4
+#define LCD_HSYNC_BACK_PORCH 8
+#define LCD_VSYNC_POLARITY 0
+#define LCD_VSYNC_FRONT_PORCH 8
+#define LCD_VSYNC_PULSE_WIDTH 4
+#define LCD_VSYNC_BACK_PORCH 8
+#define LCD_CLK_IDLE_HIGH 0
+#define LCD_DE_IDLE_HIGH 0
+#define LCD_BIT_DEPTH 16
+
+//#define LCD_PANEL esp_lcd_new_panel_st7701
+#define LCD_HRES 800
+#define LCD_VRES 480
+#define LCD_SWAP_HRES_VRES_TIMING
+#define LCD_COLOR_SPACE ESP_LCD_COLOR_SPACE_BGR
+#define LCD_SWAP_COLOR_BYTES false
+#ifdef CONFIG_SPIRAM_MODE_QUAD
+    #define LCD_PIXEL_CLOCK_HZ (6 * 1000 * 1000)
+#else
+    #define LCD_PIXEL_CLOCK_HZ (16 * 1000 * 1000)
+#endif
+
+#ifndef LCD_WIDTH
+#ifdef LCD_SWAP_XY
+#if LCD_SWAP_XY
+#define LCD_WIDTH LCD_VRES
+#define LCD_HEIGHT LCD_HRES
+#else
+#define LCD_WIDTH LCD_HRES
+#define LCD_HEIGHT LCD_VRES
+#endif
+#else
+#define LCD_WIDTH LCD_HRES
+#define LCD_HEIGHT LCD_VRES
+#endif
+#endif
+#ifndef LCD_BIT_DEPTH
+#define LCD_BIT_DEPTH 16
+#endif
+#ifndef LCD_X_ALIGN
+#define LCD_X_ALIGN 1
+#endif
+#ifndef LCD_Y_ALIGN
+#define LCD_Y_ALIGN 1
+#endif
+#ifndef LCD_DC_BIT_OFFSET
+#define LCD_DC_BIT_OFFSET 0
+#endif
+#ifndef LCD_DIVISOR
+#define LCD_DIVISOR 10
+#endif
+#endif // LCD_CONFIG_H
