@@ -1,4 +1,4 @@
-#Waveshare 4.3"
+# Waveshare 4.3"
 
 PlatformIO project initializing the touch panel and display for a Waveshare ESP32-S3 4.3" development kit under the ESP-IDF
 
