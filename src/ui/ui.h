@@ -39,6 +39,7 @@ extern lv_obj_t * ui____initial_actions0;
 
 
 void ui_init(void);
+void ui_update_touch_counter(void);
 
 #ifdef __cplusplus
 } /*extern "C"*/

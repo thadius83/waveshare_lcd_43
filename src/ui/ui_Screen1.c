@@ -4,31 +4,212 @@
 // Project name: SquareLine_Project
 
 #include "ui.h"
+#include <stdio.h>
+
+// Additional UI elements
+lv_obj_t * ui_Button1;
+lv_obj_t * ui_Button2;
+lv_obj_t * ui_Button3;
+lv_obj_t * ui_TouchLabel;
+lv_obj_t * ui_CounterLabel;
+lv_obj_t * ui_StatusLabel;
+
+static int button_counter = 0;
+static int touch_counter = 0;
+
+// Event handlers
+static void button1_event_handler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        button_counter++;
+        printf("Button 1 clicked! Count: %d\n", button_counter);
+        
+        char buf[64];
+        snprintf(buf, sizeof(buf), "Button Clicks: %d", button_counter);
+        lv_label_set_text(ui_CounterLabel, buf);
+        
+        // Change slider value
+        int current_val = lv_slider_get_value(ui_Slider1);
+        lv_slider_set_value(ui_Slider1, (current_val + 10) % 100, LV_ANIM_ON);
+    }
+}
+
+static void button2_event_handler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        printf("Button 2 clicked! Resetting counters.\n");
+        button_counter = 0;
+        touch_counter = 0;
+        
+        lv_label_set_text(ui_CounterLabel, "Button Clicks: 0");
+        lv_label_set_text(ui_TouchLabel, "Touch Count: 0");
+        lv_slider_set_value(ui_Slider1, 0, LV_ANIM_ON);
+    }
+}
+
+static void button3_event_handler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        printf("Button 3 clicked! Running display test.\n");
+        
+        // Cycle through different colors
+        static int color_index = 0;
+        lv_color_t colors[] = {
+            lv_color_hex(0xFF0000), // Red
+            lv_color_hex(0x00FF00), // Green  
+            lv_color_hex(0x0000FF), // Blue
+            lv_color_hex(0xFFFF00), // Yellow
+            lv_color_hex(0xFF00FF), // Magenta
+            lv_color_hex(0x00FFFF), // Cyan
+            lv_color_hex(0x000000)  // Black (default)
+        };
+        
+        lv_obj_set_style_bg_color(ui_Screen1, colors[color_index], 0);
+        color_index = (color_index + 1) % 7;
+        
+        lv_label_set_text(ui_StatusLabel, "Display test running...");
+    }
+}
+
+static void slider_event_handler(lv_event_t * e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_VALUE_CHANGED) {
+        int value = lv_slider_get_value(ui_Slider1);
+        printf("Slider value changed: %d\n", value);
+        
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Slider: %d%%", value);
+        lv_label_set_text(ui_Label1, buf);
+    }
+}
+
+// Function to update touch counter (called from main)
+void ui_update_touch_counter(void)
+{
+    if(ui_TouchLabel) {
+        touch_counter++;
+        static char buf[32];
+        snprintf(buf, sizeof(buf), "Touch: %d", touch_counter);
+        lv_label_set_text(ui_TouchLabel, buf);
+    }
+}
 
 void ui_Screen1_screen_init(void)
 {
     ui_Screen1 = lv_obj_create(NULL);
-    lv_obj_remove_flag(ui_Screen1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+    lv_obj_remove_flag(ui_Screen1, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(ui_Screen1, lv_color_hex(0x000000), 0);
+
+    // Title Label
+    lv_obj_t * title_label = lv_label_create(ui_Screen1);
+    lv_obj_set_width(title_label, LV_SIZE_CONTENT);
+    lv_obj_set_height(title_label, LV_SIZE_CONTENT);
+    lv_obj_set_x(title_label, 0);
+    lv_obj_set_y(title_label, -180);
+    lv_obj_set_align(title_label, LV_ALIGN_CENTER);
+    lv_label_set_text(title_label, "Waveshare ESP32-S3 4.3\" LCD Test");
+    lv_obj_set_style_text_color(title_label, lv_color_hex(0xFFFFFF), 0);
+    // Using default font - lv_font_montserrat_16 may not be available
+
+    // Slider with label
+    ui_Label1 = lv_label_create(ui_Screen1);
+    lv_obj_set_width(ui_Label1, LV_SIZE_CONTENT);
+    lv_obj_set_height(ui_Label1, LV_SIZE_CONTENT);
+    lv_obj_set_x(ui_Label1, -200);
+    lv_obj_set_y(ui_Label1, -120);
+    lv_obj_set_align(ui_Label1, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_Label1, "Slider: 0%");
+    lv_obj_set_style_text_color(ui_Label1, lv_color_hex(0xFFFFFF), 0);
 
     ui_Slider1 = lv_slider_create(ui_Screen1);
     lv_slider_set_value(ui_Slider1, 0, LV_ANIM_OFF);
-    if(lv_slider_get_mode(ui_Slider1) == LV_SLIDER_MODE_RANGE) lv_slider_set_left_value(ui_Slider1, 0, LV_ANIM_OFF);
-    lv_obj_set_width(ui_Slider1, 448);
-    lv_obj_set_height(ui_Slider1, 10);
-    lv_obj_set_x(ui_Slider1, 92);
-    lv_obj_set_y(ui_Slider1, -87);
+    lv_obj_set_width(ui_Slider1, 300);
+    lv_obj_set_height(ui_Slider1, 20);
+    lv_obj_set_x(ui_Slider1, 50);
+    lv_obj_set_y(ui_Slider1, -120);
     lv_obj_set_align(ui_Slider1, LV_ALIGN_CENTER);
+    lv_obj_add_event_cb(ui_Slider1, slider_event_handler, LV_EVENT_VALUE_CHANGED, NULL);
 
+    // Button 1 - Increment Counter
+    ui_Button1 = lv_button_create(ui_Screen1);
+    lv_obj_set_width(ui_Button1, 150);
+    lv_obj_set_height(ui_Button1, 50);
+    lv_obj_set_x(ui_Button1, -150);
+    lv_obj_set_y(ui_Button1, -50);
+    lv_obj_set_align(ui_Button1, LV_ALIGN_CENTER);
+    lv_obj_add_event_cb(ui_Button1, button1_event_handler, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t * btn1_label = lv_label_create(ui_Button1);
+    lv_label_set_text(btn1_label, "Increment");
+    lv_obj_center(btn1_label);
 
-    //Compensating for LVGL9.1 draw crash with bar/slider max value when top-padding is nonzero and right-padding is 0
-    if(lv_obj_get_style_pad_top(ui_Slider1, LV_PART_MAIN) > 0) lv_obj_set_style_pad_right(ui_Slider1,
-                                                                                              lv_obj_get_style_pad_right(ui_Slider1, LV_PART_MAIN) + 1, LV_PART_MAIN);
-    ui_Label1 = lv_label_create(ui_Screen1);
-    lv_obj_set_width(ui_Label1, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Label1, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_Label1, -176);
-    lv_obj_set_y(ui_Label1, -87);
-    lv_obj_set_align(ui_Label1, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_Label1, "Test");
+    // Button 2 - Reset
+    ui_Button2 = lv_button_create(ui_Screen1);
+    lv_obj_set_width(ui_Button2, 150);
+    lv_obj_set_height(ui_Button2, 50);
+    lv_obj_set_x(ui_Button2, 0);
+    lv_obj_set_y(ui_Button2, -50);
+    lv_obj_set_align(ui_Button2, LV_ALIGN_CENTER);
+    lv_obj_add_event_cb(ui_Button2, button2_event_handler, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t * btn2_label = lv_label_create(ui_Button2);
+    lv_label_set_text(btn2_label, "Reset");
+    lv_obj_center(btn2_label);
 
+    // Button 3 - Display Test
+    ui_Button3 = lv_button_create(ui_Screen1);
+    lv_obj_set_width(ui_Button3, 150);
+    lv_obj_set_height(ui_Button3, 50);
+    lv_obj_set_x(ui_Button3, 150);
+    lv_obj_set_y(ui_Button3, -50);
+    lv_obj_set_align(ui_Button3, LV_ALIGN_CENTER);
+    lv_obj_add_event_cb(ui_Button3, button3_event_handler, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t * btn3_label = lv_label_create(ui_Button3);
+    lv_label_set_text(btn3_label, "Color Test");
+    lv_obj_center(btn3_label);
+
+    // Counter Labels
+    ui_CounterLabel = lv_label_create(ui_Screen1);
+    lv_obj_set_width(ui_CounterLabel, LV_SIZE_CONTENT);
+    lv_obj_set_height(ui_CounterLabel, LV_SIZE_CONTENT);
+    lv_obj_set_x(ui_CounterLabel, -100);
+    lv_obj_set_y(ui_CounterLabel, 20);
+    lv_obj_set_align(ui_CounterLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_CounterLabel, "Button Clicks: 0");
+    lv_obj_set_style_text_color(ui_CounterLabel, lv_color_hex(0x00FF00), 0);
+
+    ui_TouchLabel = lv_label_create(ui_Screen1);
+    lv_obj_set_width(ui_TouchLabel, LV_SIZE_CONTENT);
+    lv_obj_set_height(ui_TouchLabel, LV_SIZE_CONTENT);
+    lv_obj_set_x(ui_TouchLabel, 100);
+    lv_obj_set_y(ui_TouchLabel, 20);
+    lv_obj_set_align(ui_TouchLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_TouchLabel, "Touch Count: 0");
+    lv_obj_set_style_text_color(ui_TouchLabel, lv_color_hex(0x00FFFF), 0);
+
+    // Status Label
+    ui_StatusLabel = lv_label_create(ui_Screen1);
+    lv_obj_set_width(ui_StatusLabel, LV_SIZE_CONTENT);
+    lv_obj_set_height(ui_StatusLabel, LV_SIZE_CONTENT);
+    lv_obj_set_x(ui_StatusLabel, 0);
+    lv_obj_set_y(ui_StatusLabel, 80);
+    lv_obj_set_align(ui_StatusLabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_StatusLabel, "System Ready - Touch screen to test");
+    lv_obj_set_style_text_color(ui_StatusLabel, lv_color_hex(0xFFFF00), 0);
+
+    // Instructions
+    lv_obj_t * instr_label = lv_label_create(ui_Screen1);
+    lv_obj_set_width(instr_label, LV_SIZE_CONTENT);
+    lv_obj_set_height(instr_label, LV_SIZE_CONTENT);
+    lv_obj_set_x(instr_label, 0);
+    lv_obj_set_y(instr_label, 150);
+    lv_obj_set_align(instr_label, LV_ALIGN_CENTER);
+    lv_label_set_text(instr_label, "Touch buttons, drag slider, check serial output");
+    lv_obj_set_style_text_color(instr_label, lv_color_hex(0xAAAAAA), 0);
+    // Using default font
 }

@@ -26,6 +26,9 @@
 #define I2C_MASTER_RX_BUF_DISABLE   0                          /*!< I2C master doesn't need buffer */
 #define I2C_MASTER_TIMEOUT_MS       1000
 
+// Global/shared I2C bus
+static i2c_master_bus_handle_t s_i2c_bus = nullptr;
+
 #define GPIO_INPUT_IO_4    4
 #define GPIO_INPUT_PIN_SEL  1ULL<<GPIO_INPUT_IO_4
 
@@ -35,8 +38,12 @@ static SemaphoreHandle_t sem_gui_ready;
 // LVGL library is not thread-safe, this example will call LVGL APIs from different tasks, so use a mutex to protect it
 static _lock_t lvgl_api_lock;
 
-static void i2c_initialize()
+static void i2c_initialize(void)
 {
+    printf("I2C Init: Configuring I2C master bus...\n");
+    printf("I2C Init: SCL GPIO=%d, SDA GPIO=%d, Freq=%dHz\n", 
+           I2C_MASTER_SCL_IO, I2C_MASTER_SDA_IO, I2C_MASTER_FREQ_HZ);
+    
     i2c_master_bus_config_t i2c_mst_config;
     memset(&i2c_mst_config,0,sizeof(i2c_mst_config));
     i2c_mst_config.clk_source = I2C_CLK_SRC_DEFAULT;
@@ -45,8 +52,14 @@ static void i2c_initialize()
     i2c_mst_config.sda_io_num = (gpio_num_t)I2C_MASTER_SDA_IO;
     i2c_mst_config.glitch_ignore_cnt = 7;
     i2c_mst_config.flags.enable_internal_pullup = 1;
-    i2c_master_bus_handle_t bus;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus));
+    
+    esp_err_t ret = i2c_new_master_bus(&i2c_mst_config, &s_i2c_bus);
+    if (ret == ESP_OK) {
+        printf("I2C Init: Master bus created successfully\n");
+    } else {
+        printf("I2C Init: Failed to create master bus, error: 0x%x\n", ret);
+    }
+    ESP_ERROR_CHECK(ret);
 }
 
 
@@ -84,12 +97,11 @@ static void lvgl_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_ma
 
 static void lcd_lvgl_task(void *arg)
 {
-    uint32_t time_till_next_ms = 0;
-    while (1) {
+    for (;;) {
         _lock_acquire(&lvgl_api_lock);
-        time_till_next_ms = lv_timer_handler();
+        uint32_t wait_ms = lv_timer_handler();
         _lock_release(&lvgl_api_lock);
-        usleep(1000 * time_till_next_ms);
+        vTaskDelay(pdMS_TO_TICKS(wait_ms ? wait_ms : 1));
     }
 }
 
@@ -180,9 +192,9 @@ static void lcd_initialize() {
         lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
         // create draw buffers
         void *buf1 = NULL;
-        // it's recommended to allocate the draw buffer from internal memory, for better performance
+        // allocate the draw buffer from PSRAM since internal RAM is limited
         size_t draw_buffer_sz = LCD_HRES * 50 * sizeof(lv_color16_t);
-        buf1 = heap_caps_malloc(draw_buffer_sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        buf1 = heap_caps_malloc(draw_buffer_sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         assert(buf1);
         // set LVGL draw buffers and partial mode
         lv_display_set_buffers(display, buf1, NULL, draw_buffer_sz, LV_DISPLAY_RENDER_MODE_PARTIAL);
@@ -201,7 +213,7 @@ static void lcd_initialize() {
         esp_timer_handle_t lvgl_tick_timer = NULL;
         ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
         ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, 2 * 1000));
-        xTaskCreate(lcd_lvgl_task, "lcd_task", 4096, NULL, 2, NULL);
+        xTaskCreate(lcd_lvgl_task, "lcd_task", 8192, NULL, 2, NULL);
     
         
 
@@ -215,49 +227,86 @@ static void my_input_read(lv_indev_t * indev, lv_indev_data_t * data)
 {
     uint16_t x[5],y[5],s[5];
     uint8_t count;
+    static bool was_pressed = false;
+    
     if(esp_lcd_touch_get_coordinates(touch_handle,x,y,s,&count,5)) {
-        data->point.x =x[0];
+        data->point.x = x[0];
         data->point.y = y[0];
         data->state = LV_INDEV_STATE_PRESSED;
+        
+        // Log touch events (only on press, not while held)
+        if(!was_pressed) {
+            printf("Touch: X=%d Y=%d\n", x[0], y[0]);
+            was_pressed = true;
+        }
         return;
     }
+    
+    // Log touch release
+    if(was_pressed) {
+        printf("Touch released\n");
+        was_pressed = false;
+    }
+    
     data->state = LV_INDEV_STATE_RELEASED;
 }
 static void touch_reset()
 {
-    i2c_master_bus_handle_t bus;
-    ESP_ERROR_CHECK(i2c_master_get_bus_handle((i2c_port_num_t)I2C_MASTER_NUM,&bus));
     i2c_master_dev_handle_t i2c=NULL;
     i2c_device_config_t dev_cfg;
     memset(&dev_cfg,0,sizeof(dev_cfg));
     dev_cfg.scl_speed_hz = 200*1000;
     dev_cfg.device_address = 0x24;
     dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus, &dev_cfg,&i2c));
-    uint8_t write_buf = 0x01;
-    ESP_ERROR_CHECK(i2c_master_transmit(i2c,&write_buf,1,I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS));
-    ESP_ERROR_CHECK(i2c_master_bus_rm_device(i2c));
+    
+    if(i2c_master_bus_add_device(s_i2c_bus, &dev_cfg,&i2c) == ESP_OK) {
+        uint8_t write_buf = 0x01;
+        i2c_master_transmit(i2c,&write_buf,1,100);
+        i2c_master_bus_rm_device(i2c);
+    }
+    
     dev_cfg.device_address = 0x38;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus, &dev_cfg,&i2c));
-    // Reset the touch screen. It is recommended to reset the touch screen before using it.
-    write_buf = 0x2C;
-    ESP_ERROR_CHECK(i2c_master_transmit(i2c,&write_buf,1,I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS));
-    esp_rom_delay_us(100 * 1000);
-    gpio_set_level((gpio_num_t)GPIO_INPUT_IO_4, 0);
-    esp_rom_delay_us(100 * 1000);
-    write_buf = 0x2E;
-    ESP_ERROR_CHECK(i2c_master_transmit(i2c,&write_buf,1,I2C_MASTER_TIMEOUT_MS / portTICK_PERIOD_MS));
-    esp_rom_delay_us(200 * 1000);
-    ESP_ERROR_CHECK(i2c_master_bus_rm_device(i2c));
+    if(i2c_master_bus_add_device(s_i2c_bus, &dev_cfg,&i2c) == ESP_OK) {
+        uint8_t write_buf = 0x2C;
+        i2c_master_transmit(i2c,&write_buf,1,100);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        gpio_set_level((gpio_num_t)GPIO_INPUT_IO_4, 0);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        write_buf = 0x2E;
+        i2c_master_transmit(i2c,&write_buf,1,100);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        i2c_master_bus_rm_device(i2c);
+    }
 }
 
 
 static void touch_initialize() {
+    printf("Touch Init: Starting GT911 touch controller initialization...\n");
+    
+    // Configure GPIO4 as output for touch reset
+    gpio_config_t io_conf = {};
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = GPIO_INPUT_PIN_SEL;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+    gpio_config(&io_conf);
+    
     touch_reset();
+    
     esp_lcd_panel_io_i2c_config_t tio_cfg;
     esp_lcd_panel_io_handle_t tio_handle;
     esp_lcd_touch_config_t tp_cfg;
     i2c_master_bus_handle_t i2c_handle;
+    
+    esp_err_t ret = (s_i2c_bus ? ESP_OK : i2c_master_get_bus_handle(I2C_MASTER_NUM,&i2c_handle));
+    if (s_i2c_bus) i2c_handle = s_i2c_bus;
+    if (ret != ESP_OK) {
+        printf("Touch Init: Failed to get I2C bus handle, error: 0x%x\n", ret);
+        return;
+    }
     
     memset(&tio_cfg,0,sizeof(tio_cfg));
     tio_cfg.dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS;
@@ -270,8 +319,13 @@ static void touch_initialize() {
     tio_cfg.on_color_trans_done = NULL;
     tio_cfg.scl_speed_hz = 200*1000;
     tio_cfg.user_ctx = NULL;
-    ESP_ERROR_CHECK(i2c_master_get_bus_handle(I2C_MASTER_NUM,&i2c_handle)) ;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_handle, &tio_cfg,&tio_handle));
+    
+    ret = esp_lcd_new_panel_io_i2c(i2c_handle, &tio_cfg,&tio_handle);
+    if (ret != ESP_OK) {
+        printf("Touch Init: Failed to create I2C panel IO, error: 0x%x\n", ret);
+        return;
+    }
+    
     memset(&tp_cfg,0,sizeof(tp_cfg));
     tp_cfg.x_max = LCD_HRES;
     tp_cfg.y_max = LCD_VRES;
@@ -283,22 +337,62 @@ static void touch_initialize() {
     tp_cfg.flags.mirror_x = 0;
     tp_cfg.flags.mirror_y = 0;
 
-    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tio_handle,&tp_cfg,&touch_handle));
-    lv_indev_t * indev = lv_indev_create();        /* Create input device connected to Default Display. */
-    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);   /* Touch pad is a pointer-like device. */
-    lv_indev_set_read_cb(indev, my_input_read);    /* Set driver function. */
-
+    ret = esp_lcd_touch_new_i2c_gt911(tio_handle,&tp_cfg,&touch_handle);
+    if (ret == ESP_OK) {
+        printf("Touch Init: GT911 touch controller created successfully\n");
+        lv_indev_t * indev = lv_indev_create();
+        lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+        lv_indev_set_read_cb(indev, my_input_read);
+        printf("Touch Init: Touch initialization completed successfully\n");
+    } else {
+        printf("Touch Init: GT911 failed (error: 0x%x) - continuing without touch\n", ret);
+        touch_handle = NULL;
+    }
 }
 extern "C" void app_main() {
-    printf("ESP-IDF version: %d.%d.%d\n",ESP_IDF_VERSION_MAJOR,ESP_IDF_VERSION_MINOR,ESP_IDF_VERSION_PATCH);
-    i2c_initialize();
-    lcd_initialize();
-    touch_initialize();
-    while(1) {
-        if(touch_handle!=NULL) {
-            esp_lcd_touch_read_data(touch_handle);
-        }
-        lv_timer_handler();
-        vTaskDelay(5);
+    // Initialize USB CDC for serial output
+    #if CONFIG_ESP_CONSOLE_USB_CDC
+    esp_err_t ret = esp_usb_console_init();
+    if (ret != ESP_OK) {
+        return;
     }
+    #endif
+    
+    // Initialize serial output
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    
+    printf("\n=== Waveshare ESP32-S3 4.3\" LCD Test ===\n");
+    printf("ESP-IDF version: %d.%d.%d\n",ESP_IDF_VERSION_MAJOR,ESP_IDF_VERSION_MINOR,ESP_IDF_VERSION_PATCH);
+    
+    // Kick off heavy work in a dedicated task, keep main lean
+    xTaskCreatePinnedToCore([](void*) {
+        printf("Initializing I2C...\n");
+        i2c_initialize();
+
+        printf("Initializing LCD...\n");
+        lcd_initialize();
+
+        printf("Initializing Touch...\n");
+        touch_initialize();
+
+        printf("System ready! Touch the screen to test.\n");
+
+        uint32_t loop_count = 0;
+        for(;;) {
+            if (touch_handle) {
+                esp_lcd_touch_read_data(touch_handle);
+            }
+            // No lv_timer_handler() here – it's in lcd_lvgl_task
+
+            if ((loop_count % 1000) == 0) {
+                printf("System running... Loop: %lu\n", loop_count);
+            }
+            loop_count++;
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+    }, "ui_main", 12288, nullptr, 5, nullptr, 0);
+
+    // Optionally delete main task (saves stack)
+    vTaskDelete(nullptr);
 }
