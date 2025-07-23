@@ -29,9 +29,15 @@ static void button1_event_handler(lv_event_t * e)
         snprintf(buf, sizeof(buf), "Button Clicks: %d", button_counter);
         lv_label_set_text(ui_CounterLabel, buf);
         
-        // Change slider value
+        // Change slider value and update percentage display
         int current_val = lv_slider_get_value(ui_Slider1);
-        lv_slider_set_value(ui_Slider1, (current_val + 10) % 100, LV_ANIM_ON);
+        int new_val = (current_val + 10) % 100;
+        lv_slider_set_value(ui_Slider1, new_val, LV_ANIM_ON);
+        
+        // Manually update the percentage label
+        char slider_buf[32];
+        snprintf(slider_buf, sizeof(slider_buf), "Slider: %d%%", new_val);
+        lv_label_set_text(ui_Label1, slider_buf);
     }
 }
 
@@ -46,6 +52,9 @@ static void button2_event_handler(lv_event_t * e)
         lv_label_set_text(ui_CounterLabel, "Button Clicks: 0");
         lv_label_set_text(ui_TouchLabel, "Touch Count: 0");
         lv_slider_set_value(ui_Slider1, 0, LV_ANIM_ON);
+        
+        // Manually update the percentage label
+        lv_label_set_text(ui_Label1, "Slider: 0%");
     }
 }
 

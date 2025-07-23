@@ -95,15 +95,6 @@ static void lvgl_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_ma
 }
 
 
-static void lcd_lvgl_task(void *arg)
-{
-    for (;;) {
-        _lock_acquire(&lvgl_api_lock);
-        uint32_t wait_ms = lv_timer_handler();
-        _lock_release(&lvgl_api_lock);
-        vTaskDelay(pdMS_TO_TICKS(wait_ms ? wait_ms : 1));
-    }
-}
 
 static void lcd_initialize() {
 
@@ -213,10 +204,8 @@ static void lcd_initialize() {
         esp_timer_handle_t lvgl_tick_timer = NULL;
         ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
         ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, 2 * 1000));
-        xTaskCreate(lcd_lvgl_task, "lcd_task", 8192, NULL, 2, NULL);
-    
+        // No separate LVGL task - handle in main loop with proper locking
         
-
         _lock_acquire(&lvgl_api_lock);
         ui_init();
         _lock_release(&lvgl_api_lock);
@@ -228,18 +217,31 @@ static void my_input_read(lv_indev_t * indev, lv_indev_data_t * data)
     uint16_t x[5],y[5],s[5];
     uint8_t count;
     static bool was_pressed = false;
+    static uint32_t debug_counter = 0;
     
-    if(esp_lcd_touch_get_coordinates(touch_handle,x,y,s,&count,5)) {
-        data->point.x = x[0];
-        data->point.y = y[0];
-        data->state = LV_INDEV_STATE_PRESSED;
+    // Debug: Print every 1000 calls to confirm this function is being called
+    if ((debug_counter % 1000) == 0) {
+        printf("DEBUG: my_input_read called %lu times\n", debug_counter);
+    }
+    debug_counter++;
+    
+    if (touch_handle) {
+        // Read fresh touch data
+        esp_lcd_touch_read_data(touch_handle);
         
-        // Log touch events (only on press, not while held)
-        if(!was_pressed) {
-            printf("Touch: X=%d Y=%d\n", x[0], y[0]);
-            was_pressed = true;
+        if(esp_lcd_touch_get_coordinates(touch_handle,x,y,s,&count,5)) {
+            data->point.x = x[0];
+            data->point.y = y[0];
+            data->state = LV_INDEV_STATE_PRESSED;
+            
+            // Log touch events and update UI counter (only on press, not while held)
+            if(!was_pressed) {
+                printf("Touch: X=%d Y=%d\n", x[0], y[0]);
+                ui_update_touch_counter(); // Update the UI touch counter
+                was_pressed = true;
+            }
+            return;
         }
-        return;
     }
     
     // Log touch release
@@ -340,9 +342,15 @@ static void touch_initialize() {
     ret = esp_lcd_touch_new_i2c_gt911(tio_handle,&tp_cfg,&touch_handle);
     if (ret == ESP_OK) {
         printf("Touch Init: GT911 touch controller created successfully\n");
+        
+        // Register LVGL input device with proper locking
+        _lock_acquire(&lvgl_api_lock);
         lv_indev_t * indev = lv_indev_create();
         lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
         lv_indev_set_read_cb(indev, my_input_read);
+        printf("Touch Init: LVGL input device registered\n");
+        _lock_release(&lvgl_api_lock);
+        
         printf("Touch Init: Touch initialization completed successfully\n");
     } else {
         printf("Touch Init: GT911 failed (error: 0x%x) - continuing without touch\n", ret);
@@ -365,34 +373,29 @@ extern "C" void app_main() {
     printf("\n=== Waveshare ESP32-S3 4.3\" LCD Test ===\n");
     printf("ESP-IDF version: %d.%d.%d\n",ESP_IDF_VERSION_MAJOR,ESP_IDF_VERSION_MINOR,ESP_IDF_VERSION_PATCH);
     
-    // Kick off heavy work in a dedicated task, keep main lean
-    xTaskCreatePinnedToCore([](void*) {
-        printf("Initializing I2C...\n");
-        i2c_initialize();
-
-        printf("Initializing LCD...\n");
-        lcd_initialize();
-
-        printf("Initializing Touch...\n");
-        touch_initialize();
-
-        printf("System ready! Touch the screen to test.\n");
-
-        uint32_t loop_count = 0;
-        for(;;) {
-            if (touch_handle) {
-                esp_lcd_touch_read_data(touch_handle);
-            }
-            // No lv_timer_handler() here – it's in lcd_lvgl_task
-
-            if ((loop_count % 1000) == 0) {
-                printf("System running... Loop: %lu\n", loop_count);
-            }
-            loop_count++;
-            vTaskDelay(pdMS_TO_TICKS(5));
+    printf("Initializing I2C...\n");
+    i2c_initialize();
+    printf("Initializing LCD...\n");
+    lcd_initialize();
+    printf("Initializing Touch...\n");
+    touch_initialize();
+    printf("System ready! Touch the screen to test.\n");
+    
+    uint32_t loop_count = 0;
+    while(1) {
+        // Call lv_timer_handler() only in ONE task, always under the LVGL lock
+        _lock_acquire(&lvgl_api_lock);
+        uint32_t wait_ms = lv_timer_handler();
+        _lock_release(&lvgl_api_lock);
+        
+        // Print status every 5 seconds with touch handle status
+        if(loop_count % 1000 == 0) {
+            printf("System running... Loop: %lu, Touch handle: %s\n", 
+                   loop_count, touch_handle ? "OK" : "NULL");
         }
-    }, "ui_main", 12288, nullptr, 5, nullptr, 0);
-
-    // Optionally delete main task (saves stack)
-    vTaskDelete(nullptr);
+        loop_count++;
+        
+        // Use vTaskDelay with proper timing based on LVGL's recommendation
+        vTaskDelay(pdMS_TO_TICKS(wait_ms ? wait_ms : 5));
+    }
 }
